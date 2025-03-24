@@ -1,6 +1,6 @@
 """
-YouTube Video Creator Core Module
-Contains functions for creating videos from text
+YouTube Video Creator Module
+This module contains all functions needed to create a complete video from a story
 """
 import os
 import re
@@ -14,421 +14,584 @@ import tempfile
 import shutil
 import warnings
 from PIL import Image
-from moviepy.editor import *
+import moviepy.editor as mp
 import torch
 import whisperx
-from typing import List, Dict, Any, Tuple, Optional
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 # Constants
-VOICE = "en-US-AnaNeural"  # Default voice for Edge TTS
-OUTPUT_DIR = "outputs"     # Directory to store temporary and output files
-if not os.path.exists(OUTPUT_DIR):
-    os.makedirs(OUTPUT_DIR)
+VOICE_NAME = "en-US-ChristopherNeural"
+VOICE_RATE = "+0%"
+VOICE_VOLUME = "+0%"
+OUTPUT_DIR = "outputs"
 
-# Configure MoviePy for Colab
-import subprocess
-try:
-    subprocess.run(['mkdir', '-p', os.path.expanduser('~/.config/moviepy')])
-    with open(os.path.expanduser('~/.config/moviepy/moviepy.conf'), 'w') as f:
-        f.write('{"FFMPEG_BINARY": "ffmpeg", "IMAGEMAGICK_BINARY": "convert"}')
-except Exception as e:
-    print(f"Warning: Could not configure MoviePy: {e}")
+# Create output directory
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Load WhisperX model
-def load_whisper_model(device="cpu", compute_type="float32"):
-    """Load WhisperX model with appropriate settings for Colab"""
-    print(f"Loading WhisperX model (device: {device}, compute type: {compute_type})...")
+# ------------------ TITLE TO SCRIPT GENERATION ------------------
+
+def expand_title_to_script(title, genre, length=500):
+    """
+    Generate a script from a title and genre
+    Args:
+        title: The title to expand
+        genre: The genre of the video
+        length: Approximate length of script in characters
+    Returns:
+        A script based on the title
+    """
+    # For now, this is a placeholder function.
+    # In a real implementation, you would use an AI model or API to generate a script
+    print(f"Title expansion is not implemented. Please provide your own script.")
+    return None
+
+# ------------------ SCRIPT TO AUDIO CONVERSION ------------------
+
+def clean_text(text):
+    """Clean text for TTS processing"""
+    # Replace newlines with spaces
+    text = re.sub(r'\n+', ' ', text)
+    # Remove extra spaces
+    text = re.sub(r'\s+', ' ', text)
+    # Remove special characters that might cause issues
+    text = re.sub(r'[^\w\s.,!?;:\-\'\"()]', '', text)
+    return text.strip()
+
+async def _generate_audio(text, output_file, voice_name=VOICE_NAME, rate=VOICE_RATE, volume=VOICE_VOLUME):
+    """Generate audio from text using edge-tts"""
+    communicate = edge_tts.Communicate(text, voice_name, rate=rate, volume=volume)
+    await communicate.save(output_file)
+
+def text_to_speech(text, output_file):
+    """
+    Convert text to speech using Edge TTS
+    Args:
+        text: The text to convert to speech
+        output_file: Output audio file path
+    Returns:
+        Path to the generated audio file
+    """
+    text = clean_text(text)
+    
     try:
-        model = whisperx.load_model("base", device, compute_type=compute_type)
+        # Run the async function
+        asyncio.run(_generate_audio(text, output_file))
+        return output_file
+    except Exception as e:
+        print(f"Error generating audio: {e}")
+        return None
+
+# ------------------ AUDIO TO TRANSCRIPT CSV ------------------
+
+def load_whisperx_model(device="cuda", compute_type="float16"):
+    """
+    Load the WhisperX model for timestamp extraction
+    Args:
+        device: The device to run the model on ('cuda' or 'cpu')
+        compute_type: The computation type ('float16' or 'float32')
+    Returns:
+        Loaded WhisperX model
+    """
+    try:
+        # Check if CUDA is available when device is set to cuda
+        if device == "cuda" and not torch.cuda.is_available():
+            print("CUDA not available, falling back to CPU")
+            device = "cpu"
+            compute_type = "float32"  # Use float32 for CPU
+        
+        # For CPU, always use float32
+        if device == "cpu":
+            compute_type = "float32"
+        
+        print(f"Loading WhisperX model on {device} with {compute_type}...")
+        model = whisperx.load_model("tiny", device, compute_type=compute_type)
         print("WhisperX model loaded successfully")
         return model
     except Exception as e:
         print(f"Error loading WhisperX model: {e}")
-        print("Attempting fallback configuration...")
+        # Fallback to CPU with float32
         try:
-            # Fallback to CPU
-            device = "cpu"
-            compute_type = "float32"
-            model = whisperx.load_model("base", device, compute_type=compute_type)
-            print("WhisperX model loaded with fallback configuration")
+            print("Attempting to load model on CPU with float32...")
+            model = whisperx.load_model("tiny", "cpu", compute_type="float32")
+            print("WhisperX model loaded successfully on CPU")
             return model
-        except Exception as e:
-            print(f"Critical error loading WhisperX model: {e}")
-            raise
+        except Exception as e2:
+            print(f"Critical error loading WhisperX model: {e2}")
+            return None
 
-def clean_text(text):
-    """Clean text to remove special characters and normalize spacing"""
-    text = re.sub(r'[^a-zA-Z0-9\s.,!?]', '', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
-
-async def text_to_speech(text, voice=VOICE):
-    """Convert text to speech using Edge TTS"""
-    output_file = os.path.join(OUTPUT_DIR, "speech.mp3")
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(output_file)
-    return output_file
-
-def extract_timestamps(audio_file, whisper_model):
-    """Extract word-level timestamps using WhisperX"""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    audio = whisperx.load_audio(audio_file)
-    result = whisper_model.transcribe(audio, language="en")
-    
-    # Get word-level timestamps
-    model_a, metadata = whisperx.load_align_model(language_code="en", device=device)
-    result = whisperx.align(result["segments"], model_a, metadata, audio, device)
-    
-    words_with_timestamps = []
-    for segment in result["segments"]:
-        for word in segment["words"]:
-            words_with_timestamps.append({
-                "word": word["word"],
-                "start": word["start"],
-                "end": word["end"]
-            })
-    
-    return words_with_timestamps
-
-def fetch_pexels_videos(query, api_key, per_page=5):
-    """Fetch videos from Pexels API based on query"""
-    if not api_key:
-        print("Pexels API key is required")
-        return []
-    
-    url = f"https://api.pexels.com/videos/search?query={query}&per_page={per_page}"
-    headers = {"Authorization": api_key}
-    
+def extract_timestamps(audio_file, device="cuda", compute_type="float16"):
+    """
+    Extract word-level timestamps from audio
+    Args:
+        audio_file: Path to the audio file
+        device: Device to run the model on
+        compute_type: Computation type for the model
+    Returns:
+        Dataframe with word-level timestamps
+    """
     try:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            videos = []
-            for video in data.get("videos", []):
-                # Get the medium size video file
-                video_files = video.get("video_files", [])
-                for file in video_files:
-                    if file["quality"] == "sd" and file["width"] < 900:
-                        videos.append({
-                            "url": file["link"],
-                            "width": file["width"],
-                            "height": file["height"]
-                        })
-                        break
-            print(f"Found {len(videos)} videos for query: {query}")
-            return videos
-        else:
-            print(f"Pexels API error: {response.status_code}")
-            return []
+        # Load model
+        model = load_whisperx_model(device, compute_type)
+        if model is None:
+            return None
+        
+        # Transcribe audio
+        print("Transcribing audio with WhisperX...")
+        result = model.transcribe(audio_file)
+        
+        # Use alignment model to get word-level timestamps
+        print("Aligning words for timestamps...")
+        model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
+        result = whisperx.align(result["segments"], model_a, metadata, audio_file, device)
+        
+        # Extract word information
+        word_timestamps = []
+        for segment in result["segments"]:
+            for word in segment["words"]:
+                word_timestamps.append({
+                    "word": word["word"],
+                    "start": word["start"],
+                    "end": word["end"]
+                })
+        
+        return word_timestamps
     except Exception as e:
-        print(f"Error fetching Pexels videos: {e}")
-        return []
+        print(f"Error extracting timestamps: {e}")
+        return None
 
-def fetch_tenor_gifs(query, api_key, limit=5):
-    """Fetch GIFs from Tenor API based on query"""
-    if not api_key:
-        print("Tenor API key is required")
-        return []
-    
-    url = f"https://tenor.googleapis.com/v2/search?q={query}&key={api_key}&limit={limit}"
-    
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            gifs = []
-            for result in data.get("results", []):
-                media_formats = result.get("media_formats", {})
-                if "gif" in media_formats:
-                    gifs.append({
-                        "url": media_formats["gif"]["url"],
-                        "width": media_formats["gif"]["dims"][0],
-                        "height": media_formats["gif"]["dims"][1]
-                    })
-            print(f"Found {len(gifs)} GIFs for query: {query}")
-            return gifs
-        else:
-            print(f"Tenor API error: {response.status_code}")
-            return []
-    except Exception as e:
-        print(f"Error fetching Tenor GIFs: {e}")
-        return []
+# ------------------ TRANSCRIPT TO VIDEO/GIF MATCHING ------------------
 
-def download_media(url, output_path):
-    """Download media from URL to specified path"""
-    try:
-        response = requests.get(url, stream=True)
-        if response.status_code == 200:
-            with open(output_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=1024):
-                    if chunk:
-                        f.write(chunk)
-            return True
-        else:
-            print(f"Failed to download media: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"Error downloading media: {e}")
-        return False
+def extract_keywords(text, genre):
+    """
+    Extract keywords from text for media search
+    Args:
+        text: The text to extract keywords from
+        genre: The genre to include in keywords
+    Returns:
+        List of keywords
+    """
+    # Simple keyword extraction (can be improved with NLP)
+    # Remove common words and keep only meaningful ones
+    common_words = {"the", "a", "an", "in", "on", "at", "to", "for", "with", "by", "of", 
+                  "and", "or", "but", "is", "are", "was", "were", "be", "been", "being", 
+                  "have", "has", "had", "do", "does", "did", "will", "would", "shall", "should",
+                  "can", "could", "may", "might", "must", "ought", "i", "you", "he", "she", 
+                  "it", "we", "they", "me", "him", "her", "us", "them"}
+    
+    # Split text into words and filter
+    words = re.findall(r'\b\w+\b', text.lower())
+    keywords = [word for word in words if word not in common_words and len(word) > 3]
+    
+    # Add genre as a keyword
+    if genre and genre.lower() not in [k.lower() for k in keywords]:
+        keywords.append(genre.lower())
+    
+    # Deduplicate and return
+    return list(set(keywords))
 
-def get_keywords_from_text(text, num_keywords=5):
-    """Extract keywords from text for media search"""
-    # Simple implementation - split by spaces and get unique words
-    words = re.findall(r'\b[a-zA-Z]{4,}\b', text.lower())
-    # Remove common words
-    common_words = {"the", "and", "that", "have", "for", "not", "with", "you", "this", "but"}
-    words = [word for word in words if word not in common_words]
-    
-    # Count frequency
-    word_count = {}
-    for word in words:
-        if word in word_count:
-            word_count[word] += 1
-        else:
-            word_count[word] = 1
-    
-    # Sort by frequency
-    sorted_words = sorted(word_count.items(), key=lambda x: x[1], reverse=True)
-    keywords = [word for word, _ in sorted_words[:num_keywords]]
-    
-    return keywords
-
-def group_words_into_phrases(word_timestamps):
-    """Group words into phrases for better media sync"""
+def group_words_into_phrases(word_timestamps, max_phrase_duration=5.0):
+    """
+    Group words into phrases for media search
+    Args:
+        word_timestamps: List of word timestamps
+        max_phrase_duration: Maximum duration of a phrase in seconds
+    Returns:
+        List of phrases with start and end times
+    """
     phrases = []
     current_phrase = []
+    current_start = None
+    current_end = None
+    current_text = ""
     
-    for word_data in word_timestamps:
-        current_phrase.append(word_data)
-        if word_data["word"].strip() in {",", ".", "!", "?", ";", ":"} or len(current_phrase) >= 5:
-            if current_phrase:
-                start_time = current_phrase[0]["start"]
-                end_time = current_phrase[-1]["end"]
-                phrase_text = " ".join([w["word"] for w in current_phrase])
-                phrases.append({
-                    "text": phrase_text,
-                    "start": start_time,
-                    "end": end_time,
-                    "duration": end_time - start_time
-                })
-            current_phrase = []
+    for word_info in word_timestamps:
+        word = word_info["word"].strip()
+        start = word_info["start"]
+        end = word_info["end"]
+        
+        # Start a new phrase
+        if not current_phrase:
+            current_phrase = [word_info]
+            current_start = start
+            current_end = end
+            current_text = word
+            continue
+        
+        # If adding this word would exceed the max duration, start a new phrase
+        if end - current_start > max_phrase_duration:
+            phrases.append({
+                "text": current_text,
+                "start": current_start,
+                "end": current_end,
+                "words": current_phrase
+            })
+            current_phrase = [word_info]
+            current_start = start
+            current_end = end
+            current_text = word
+        else:
+            # Otherwise, add to current phrase
+            current_phrase.append(word_info)
+            current_end = end
+            current_text += " " + word
     
-    # Add any remaining words
+    # Add the last phrase
     if current_phrase:
-        start_time = current_phrase[0]["start"]
-        end_time = current_phrase[-1]["end"]
-        phrase_text = " ".join([w["word"] for w in current_phrase])
         phrases.append({
-            "text": phrase_text,
-            "start": start_time,
-            "end": end_time,
-            "duration": end_time - start_time
+            "text": current_text,
+            "start": current_start,
+            "end": current_end,
+            "words": current_phrase
         })
     
     return phrases
 
-def loop_clip(clip, target_duration):
-    """Loop a clip to reach the target duration"""
-    n_loops = int(np.ceil(target_duration / clip.duration))
-    return concatenate_videoclips([clip] * n_loops).subclip(0, target_duration)
-
-def add_subtitle_to_clip(clip, text, start_time, end_time):
-    """Add subtitle to video clip"""
-    txt_clip = TextClip(text, fontsize=30, color='white', font='Arial', 
-                        bg_color='black', stroke_color='black', stroke_width=1,
-                        method='caption', size=(clip.w, None))
-    txt_clip = txt_clip.set_duration(end_time - start_time)
-    txt_clip = txt_clip.set_position(('center', 'bottom'))
-    
-    return CompositeVideoClip([clip, txt_clip])
-
-def create_video(story, genre, title, pexels_api_key, tenor_api_key, include_subtitles=True, resolution="720p", progress_callback=None):
-    """Main function to create video from text
-    
-    Args:
-        story (str): The story text to convert to video
-        genre (str): Genre for media selection
-        title (str): Video title
-        pexels_api_key (str): API key for Pexels
-        tenor_api_key (str): API key for Tenor
-        include_subtitles (bool): Whether to include subtitles
-        resolution (str): Video resolution: 480p, 720p, or 1080p
-        progress_callback (callable): Optional callback function to report progress
-        
-    Returns:
-        str: Path to output video file or error message
+def fetch_pexels_videos(query, api_key, resolution="720p", per_page=10, orientation="landscape"):
     """
-    def update_progress(message):
-        """Update progress if callback is provided"""
-        if progress_callback:
-            progress_callback(message)
-        else:
-            print(message)
-    
-    update_progress(f"Creating video with genre '{genre}' and title '{title}'")
-    update_progress(f"Story length: {len(story)} characters")
-    
-    # Create temp directory
-    temp_dir = os.path.join(OUTPUT_DIR, f"temp_{int(time.time())}")
-    os.makedirs(temp_dir, exist_ok=True)
+    Fetch videos from Pexels API based on keywords
+    Args:
+        query: Search query
+        api_key: Pexels API key
+        resolution: Desired resolution
+        per_page: Number of results to fetch
+        orientation: Video orientation
+    Returns:
+        List of video URLs
+    """
+    url = f"https://api.pexels.com/videos/search?query={query}&per_page={per_page}&orientation={orientation}"
+    headers = {"Authorization": api_key}
     
     try:
-        # Clean the input text
-        story = clean_text(story)
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
         
-        # Load WhisperX model
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        compute_type = "float32"  # Always use float32 for Colab compatibility
-        update_progress("Loading WhisperX model...")
-        whisper_model = load_whisper_model(device, compute_type)
+        videos = []
+        for video in data.get("videos", []):
+            # Get video file based on resolution
+            video_files = video.get("video_files", [])
+            for file in video_files:
+                if resolution in file.get("quality", "").lower():
+                    videos.append({
+                        "url": file.get("link"),
+                        "width": file.get("width"),
+                        "height": file.get("height"),
+                        "duration": video.get("duration")
+                    })
+                    break
+        
+        return videos
+    except Exception as e:
+        print(f"Error fetching Pexels videos: {e}")
+        return []
+
+def fetch_tenor_gifs(query, api_key, limit=10):
+    """
+    Fetch GIFs from Tenor API based on keywords
+    Args:
+        query: Search query
+        api_key: Tenor API key
+        limit: Number of results to fetch
+    Returns:
+        List of GIF URLs
+    """
+    url = f"https://g.tenor.com/v1/search?q={query}&key={api_key}&limit={limit}"
+    
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        
+        gifs = []
+        for result in data.get("results", []):
+            media = result.get("media", [{}])[0]
+            gif = media.get("gif", {})
+            gifs.append({
+                "url": gif.get("url"),
+                "width": gif.get("dims", [0, 0])[0],
+                "height": gif.get("dims", [0, 0])[1]
+            })
+        
+        return gifs
+    except Exception as e:
+        print(f"Error fetching Tenor GIFs: {e}")
+        return []
+
+def download_media(url, output_file):
+    """
+    Download media from URL
+    Args:
+        url: URL of the media
+        output_file: Output file path
+    Returns:
+        Path to the downloaded file
+    """
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        
+        with open(output_file, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                file.write(chunk)
+        
+        return output_file
+    except Exception as e:
+        print(f"Error downloading media: {e}")
+        return None
+
+# ------------------ GIF TO VIDEO CONVERSION ------------------
+
+def gif_to_video(gif_path, output_path, duration=None, resolution=None):
+    """
+    Convert GIF to video
+    Args:
+        gif_path: Path to the GIF file
+        output_path: Path for the output video
+        duration: Duration of the video
+        resolution: Target resolution (width, height)
+    Returns:
+        Path to the output video
+    """
+    try:
+        # Load the GIF as clip
+        clip = mp.VideoFileClip(gif_path)
+        
+        # Set the duration
+        if duration:
+            clip = clip.loop(duration=duration)
+        
+        # Resize if resolution is specified
+        if resolution:
+            clip = clip.resize(resolution)
+        
+        # Write to file
+        clip.write_videofile(output_path, codec='libx264', audio=False, fps=24)
+        clip.close()
+        
+        return output_path
+    except Exception as e:
+        print(f"Error converting GIF to video: {e}")
+        return None
+
+def loop_clip_to_duration(clip, target_duration):
+    """
+    Loop a clip to reach the target duration
+    Args:
+        clip: MoviePy VideoClip
+        target_duration: Target duration in seconds
+    Returns:
+        Looped clip
+    """
+    if clip.duration >= target_duration:
+        return clip.subclip(0, target_duration)
+    
+    # Calculate how many times we need to loop
+    loops = int(np.ceil(target_duration / clip.duration))
+    return mp.concatenate_videoclips([clip] * loops).subclip(0, target_duration)
+
+# ------------------ SUBTITLE GENERATION ------------------
+
+def add_subtitles(clip, word_timestamps, font_size=40, color='white', stroke_color='black', stroke_width=2):
+    """
+    Add subtitles to a video clip
+    Args:
+        clip: MoviePy VideoClip
+        word_timestamps: List of word timestamps
+        font_size: Font size for subtitles
+        color: Font color
+        stroke_color: Stroke color
+        stroke_width: Stroke width
+    Returns:
+        Clip with subtitles
+    """
+    subtitle_clips = []
+    
+    for word_info in word_timestamps:
+        word = word_info["word"].strip()
+        start = word_info["start"]
+        end = word_info["end"]
+        duration = end - start
+        
+        # Create TextClip for the word
+        txt_clip = mp.TextClip(word, fontsize=font_size, color=color, stroke_color=stroke_color, 
+                             stroke_width=stroke_width, font='Arial-Bold', method='caption')
+        
+        # Set position to bottom center
+        txt_clip = txt_clip.set_position(('center', 'bottom')).set_duration(duration).set_start(start)
+        
+        subtitle_clips.append(txt_clip)
+    
+    # Composite all subtitle clips over the main clip
+    return mp.CompositeVideoClip([clip] + subtitle_clips)
+
+# ------------------ FINAL VIDEO CREATION ------------------
+
+def create_video(story, genre, title, pexels_api_key, tenor_api_key, include_subtitles=True, 
+               resolution="720p", progress_callback=None):
+    """
+    Create a complete video from a story
+    Args:
+        story: The story text
+        genre: The genre of the video
+        title: The title of the video
+        pexels_api_key: Pexels API key
+        tenor_api_key: Tenor API key
+        include_subtitles: Whether to include subtitles
+        resolution: Video resolution (480p, 720p, 1080p)
+        progress_callback: Callback function for progress updates
+    Returns:
+        Path to the output video file
+    """
+    start_time = time.time()
+    temp_dir = tempfile.mkdtemp()
+    
+    try:
+        # Set resolution parameters
+        res_map = {
+            "480p": (854, 480),
+            "720p": (1280, 720),
+            "1080p": (1920, 1080)
+        }
+        video_resolution = res_map.get(resolution, (1280, 720))
+        
+        # Callback for progress
+        def update_progress(message):
+            if progress_callback:
+                progress_callback(message)
+            else:
+                print(message)
         
         # Step 1: Convert text to speech
-        update_progress("Converting text to speech...")
-        speech_file = asyncio.run(text_to_speech(story))
-        update_progress("Speech generated successfully.")
+        update_progress("Step 1/5: Converting text to speech...")
+        audio_file = os.path.join(temp_dir, "audio.mp3")
+        speech_result = text_to_speech(story, audio_file)
         
-        # Step 2: Extract timestamps
-        update_progress("Extracting word timestamps...")
-        word_timestamps = extract_timestamps(speech_file, whisper_model)
-        update_progress(f"Extracted timestamps for {len(word_timestamps)} words")
+        if not speech_result:
+            return "Error: Failed to generate speech audio"
         
-        # Step 3: Generate keywords based on story and genre
-        keywords = get_keywords_from_text(story)
-        if genre:
-            keywords.append(genre)
-        update_progress(f"Generated keywords: {keywords}")
+        # Step 2: Extract word-level timestamps
+        update_progress("Step 2/5: Extracting word-level timestamps...")
+        word_timestamps = extract_timestamps(audio_file)
         
-        # Step 4: Fetch videos and GIFs
-        update_progress("Fetching media...")
+        if not word_timestamps:
+            return "Error: Failed to extract timestamps"
         
-        # Step A: Fetch videos from Pexels
-        videos = []
-        for keyword in keywords:
-            videos.extend(fetch_pexels_videos(f"{keyword} {genre}".strip(), pexels_api_key, per_page=2))
-        
-        # Step B: Fetch GIFs from Tenor as backup
-        gifs = []
-        for keyword in keywords:
-            gifs.extend(fetch_tenor_gifs(f"{keyword} {genre}".strip(), tenor_api_key, limit=2))
-        
-        # Combine and shuffle media sources
-        media_sources = videos + gifs
-        random.shuffle(media_sources)
-        
-        if not media_sources:
-            return "Error: No media found. Please check API keys or try different keywords."
-        
-        update_progress(f"Found {len(media_sources)} media items")
-        
-        # Step 5: Download media files
-        update_progress("Downloading media files...")
-        media_files = []
-        for i, media in enumerate(media_sources):
-            extension = "mp4" if "video" in media.get("url", "") else "gif"
-            output_path = os.path.join(temp_dir, f"media_{i}.{extension}")
-            if download_media(media["url"], output_path):
-                media_files.append({
-                    "path": output_path,
-                    "type": extension,
-                    "width": media.get("width", 720),
-                    "height": media.get("height", 480)
-                })
-        
-        update_progress(f"Downloaded {len(media_files)} media files")
-        
-        # Step 6: Set video resolution
-        if resolution == "720p":
-            target_width, target_height = 1280, 720
-        elif resolution == "1080p":
-            target_width, target_height = 1920, 1080
-        else:  # Default to 480p
-            target_width, target_height = 854, 480
-        
-        # Step 7: Create clips from media files
-        update_progress("Creating video clips...")
-        audio_clip = AudioFileClip(speech_file)
-        audio_duration = audio_clip.duration
-        
-        # Group words into phrases for better media sync
+        # Step 3: Group words into phrases for media search
+        update_progress("Step 3/5: Analyzing text for media matching...")
         phrases = group_words_into_phrases(word_timestamps)
-        update_progress(f"Created {len(phrases)} phrases for synchronization")
         
-        # Create video clips
+        # Load audio clip to get duration
+        audio_clip = mp.AudioFileClip(audio_file)
+        total_duration = audio_clip.duration
+        
+        # Step 4: Fetch and prepare media for each phrase
+        update_progress("Step 4/5: Fetching and preparing media...")
         video_clips = []
-        for i, phrase in enumerate(phrases):
-            # Select media file (cycling through available media)
-            media_index = i % len(media_files)
-            media = media_files[media_index]
-            
-            if i % 5 == 0:
-                update_progress(f"Processing phrase {i+1}/{len(phrases)}")
-            
-            try:
-                if media["type"] == "mp4":
-                    clip = VideoFileClip(media["path"])
-                else:  # GIF
-                    clip = VideoFileClip(media["path"])
-                
-                # Resize to target resolution
-                clip = clip.resize(width=target_width, height=target_height)
-                
-                # Set duration and position
-                clip = clip.subclip(0, min(phrase["duration"], clip.duration))
-                if clip.duration < phrase["duration"]:
-                    # Loop the clip if it's shorter than needed
-                    clip = loop_clip(clip, phrase["duration"])
-                
-                # Set start time
-                clip = clip.set_start(phrase["start"])
-                
-                # Add subtitles if requested
-                if include_subtitles:
-                    clip = add_subtitle_to_clip(clip, phrase["text"], phrase["start"], phrase["end"])
-                
-                video_clips.append(clip)
-            except Exception as e:
-                update_progress(f"Warning: Could not process clip {i+1}: {e}")
-                continue
         
-        update_progress("Combining clips into final video...")
-        # Step 8: Combine clips into final video
-        final_clip = CompositeVideoClip(video_clips, size=(target_width, target_height))
-        final_clip = final_clip.set_duration(audio_duration)
+        for i, phrase in enumerate(phrases):
+            update_progress(f"  Processing phrase {i+1}/{len(phrases)}...")
+            phrase_duration = phrase["end"] - phrase["start"]
+            
+            # Extract keywords from the phrase
+            keywords = extract_keywords(phrase["text"], genre)
+            search_query = " ".join(keywords[:3]) if keywords else genre
+            
+            # Try to get a video first, fallback to GIF
+            videos = fetch_pexels_videos(search_query, pexels_api_key, resolution=resolution)
+            
+            if videos:
+                # Use a random video from results
+                video_info = random.choice(videos)
+                video_path = os.path.join(temp_dir, f"video_{i}.mp4")
+                
+                if download_media(video_info["url"], video_path):
+                    # Load the video and set duration
+                    video_clip = mp.VideoFileClip(video_path)
+                    video_clip = loop_clip_to_duration(video_clip, phrase_duration)
+                    
+                    # Resize to target resolution
+                    video_clip = video_clip.resize(video_resolution)
+                    
+                    # Set start time
+                    video_clip = video_clip.set_start(phrase["start"])
+                    
+                    video_clips.append(video_clip)
+            else:
+                # Fallback to GIFs
+                gifs = fetch_tenor_gifs(search_query, tenor_api_key)
+                
+                if gifs:
+                    gif_info = random.choice(gifs)
+                    gif_path = os.path.join(temp_dir, f"gif_{i}.gif")
+                    
+                    if download_media(gif_info["url"], gif_path):
+                        # Convert GIF to video
+                        gif_video_path = os.path.join(temp_dir, f"gif_video_{i}.mp4")
+                        if gif_to_video(gif_path, gif_video_path, duration=phrase_duration):
+                            # Load the video
+                            gif_clip = mp.VideoFileClip(gif_video_path)
+                            
+                            # Resize to target resolution
+                            gif_clip = gif_clip.resize(video_resolution)
+                            
+                            # Set start time
+                            gif_clip = gif_clip.set_start(phrase["start"])
+                            
+                            video_clips.append(gif_clip)
+        
+        # Step 5: Combine everything into the final video
+        update_progress("Step 5/5: Creating final video...")
+        
+        # Create a black background clip for the entire duration
+        background = mp.ColorClip(video_resolution, color=(0, 0, 0), duration=total_duration)
+        
+        # Combine all video clips on top of the background
+        if video_clips:
+            final_clip = mp.CompositeVideoClip([background] + video_clips)
+        else:
+            final_clip = background
+        
+        # Add subtitles if requested
+        if include_subtitles:
+            update_progress("  Adding subtitles...")
+            final_clip = add_subtitles(final_clip, word_timestamps)
         
         # Add audio
         final_clip = final_clip.set_audio(audio_clip)
         
-        # Add title at the beginning
-        if title:
-            update_progress(f"Adding title: '{title}'")
-            title_clip = TextClip(title, fontsize=70, color='white', bg_color='black',
-                                 size=(target_width, target_height), method='caption')
-            title_clip = title_clip.set_duration(3)
-            final_clip = CompositeVideoClip([title_clip, final_clip.set_start(3)])
-            final_clip = final_clip.set_duration(audio_duration + 3)
+        # Create output filename based on title
+        safe_title = re.sub(r'[^a-zA-Z0-9_]', '_', title).lower()
+        timestamp = int(time.time())
+        output_filename = f"{safe_title}_{timestamp}.mp4"
+        output_path = os.path.join(OUTPUT_DIR, output_filename)
         
-        # Export video
-        output_file = os.path.join(OUTPUT_DIR, f"video_{int(time.time())}.mp4")
-        update_progress(f"Rendering final video to {output_file}...")
-        final_clip.write_videofile(output_file, fps=24, codec='libx264', audio_codec='aac')
+        # Write the final video
+        update_progress("  Rendering final video...")
+        final_clip.write_videofile(output_path, codec='libx264', audio_codec='aac', fps=24)
         
-        # Clean up
-        shutil.rmtree(temp_dir)
-        update_progress("Video creation completed!")
+        # Cleanup
+        for clip in video_clips:
+            clip.close()
+        audio_clip.close()
+        final_clip.close()
         
-        # Return path to final video
-        return output_file
+        end_time = time.time()
+        update_progress(f"Video created successfully in {end_time - start_time:.2f} seconds!")
+        
+        return output_path
     
     except Exception as e:
-        # Clean up on error
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-        update_progress(f"Error creating video: {e}")
         return f"Error: {str(e)}"
+    
+    finally:
+        # Clean up temporary directory
+        try:
+            shutil.rmtree(temp_dir)
+        except:
+            pass
 
 # Simple test to verify the module works
 if __name__ == "__main__":
