@@ -53,3 +53,5 @@ This is a Python-based video creator that creates complete YouTube-ready videos 
 - If you encounter any issues with audio generation, try rerunning the setup.py script
 - If WhisperX model loading fails, try restarting the Colab runtime
 - For errors related to media, check your API keys and internet connection 
+
+!rm -f app.py 
