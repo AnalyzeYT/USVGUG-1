@@ -7,4 +7,5 @@ whisperx>=3.2.0
 torch>=2.0.0
 torchvision>=0.15.0
 torchaudio>=2.0.0
-ipywidgets>=8.0.0 
+ipywidgets>=8.0.0
+gradio>=3.50.0 
