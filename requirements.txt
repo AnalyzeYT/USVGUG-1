@@ -1,0 +1,10 @@
+gradio>=4.0.0
+edge-tts>=6.1.0
+requests>=2.28.2
+numpy>=1.23.5
+Pillow>=9.4.0
+moviepy>=1.0.3
+whisperx>=3.2.0
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0 
