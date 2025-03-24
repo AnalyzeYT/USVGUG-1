@@ -1,65 +1,55 @@
-# YouTube Video Creator - Google Colab Implementation
+# YouTube Video Creator for Google Colab
 
-This project allows you to create complete YouTube-ready videos by simply uploading or pasting a story. The app processes text into audio, generates timestamps, and synchronizes relevant media to create a complete video.
+This is a Python-based video creator that creates complete YouTube-ready videos from stories. It works in Google Colab without requiring Gradio or notebook files.
 
-## Quick Start - Google Colab
+## How to Use in Google Colab
 
-1. Open the notebook in Google Colab by clicking this badge:
-   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/YOUR_USERNAME/youtube-video-creator/blob/main/youtube_video_creator.ipynb)
+1. **Create a new Colab notebook**
 
-2. Run all cells in order
+2. **Upload the Python files**
+   - Upload `setup.py`, `video_creator.py`, and `run_app.py` to your Colab session
+   - You can upload files using the file upload button in the left sidebar
 
-3. Enter your API keys (get them from [Pexels API](https://www.pexels.com/api/) and [Tenor API](https://developers.google.com/tenor/guides/quickstart))
+3. **Run the following in a Colab cell:**
+   ```python
+   # Run the setup script
+   %run setup.py
+   
+   # Run the main application
+   %run run_app.py
+   ```
 
-4. Enter your story, select options, and click "Create Video"
+4. **Follow the prompts to enter:**
+   - Your story (or use the sample)
+   - Genre selection
+   - Video title
+   - Subtitle preference
+   - Resolution
+   - API keys for Pexels and Tenor
 
-## Features
+5. **When finished, the video will be displayed in Colab and available for download**
 
-- **Text-to-Speech**: Convert your story to natural-sounding speech using Edge TTS
-- **Word-Level Timestamps**: Extract precise timing for each word using WhisperX
-- **Automatic Media Selection**: Fetch relevant videos and GIFs based on your story and selected genre
-- **Custom Options**: Choose resolution, enable/disable subtitles, and set a custom title
-- **Pure Python Implementation**: No web framework dependencies, runs directly in Colab
+## Files Included
 
-## How It Works
-
-1. Your story is converted to speech using Edge TTS
-2. WhisperX extracts timestamps for each word
-3. Keywords are extracted from your story and combined with the genre to search for relevant media
-4. Videos and GIFs are fetched from Pexels and Tenor APIs
-5. Media clips are synchronized with the audio based on word timestamps
-6. The final video is rendered with MoviePy
+- **setup.py**: Installs all required dependencies and configures the environment
+- **video_creator.py**: Contains the core functionality for creating videos
+- **run_app.py**: Simple command-line interface to run in Colab
 
 ## Requirements
 
-- Python 3.7+
-- Libraries listed in requirements.txt
-- API keys for Pexels and Tenor
+- Pexels API key (get from [Pexels API](https://www.pexels.com/api/))
+- Tenor API key (get from [Tenor API](https://developers.google.com/tenor/guides/quickstart))
 
-## Manual Installation (If not using Colab)
+## Features
 
-```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/youtube-video-creator.git
-cd youtube-video-creator
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the notebook
-jupyter notebook youtube_video_creator.ipynb
-```
-
-## Notes
-
-- Processing time depends on story length and available computing resources
-- For best results, provide clear, detailed stories (1-3 paragraphs recommended)
-- The app works best with GPU acceleration enabled
-- Media quality depends on available content from Pexels and Tenor for your keywords
-- This version is optimized for Google Colab and doesn't require Gradio or a web interface
+- Text-to-speech conversion using Edge TTS
+- Word-level timestamp extraction with WhisperX
+- Automatic media collection from Pexels and Tenor
+- Video creation with MoviePy
+- Simple command-line interface for Google Colab
 
 ## Troubleshooting
 
-- If you encounter ALSA errors or model loading errors in Colab, try restarting the runtime
-- If WhisperX fails to load, the app will automatically fall back to CPU mode with float32 computation
-- For "CUDA out of memory" errors, try decreasing the resolution to 480p or shortening your story 
+- If you encounter any issues with audio generation, try rerunning the setup.py script
+- If WhisperX model loading fails, try restarting the Colab runtime
+- For errors related to media, check your API keys and internet connection 
