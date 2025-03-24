@@ -1,6 +1,6 @@
-# YouTube Video Creator for Google Colab
+# YouTube Video Creator - Non-Gradio Direct Python Solution
 
-This is a Python-based video creator that creates complete YouTube-ready videos from stories. It works in Google Colab without requiring Gradio or notebook files.
+This is a Python-based video creator that creates complete YouTube-ready videos from stories. It works in Google Colab as a **direct Python script** without starting any web servers, Gradio interfaces, or running on any local URLs.
 
 ## How to Use in Google Colab
 
@@ -19,15 +19,22 @@ This is a Python-based video creator that creates complete YouTube-ready videos 
    %run run_app.py
    ```
 
-4. **Follow the prompts to enter:**
+4. **Follow the command-line prompts directly in the Colab cell:**
    - Your story (or use the sample)
-   - Genre selection
+   - Genre selection (enter a number from the list)
    - Video title
-   - Subtitle preference
-   - Resolution
+   - Subtitle preference (y/n)
+   - Resolution (enter a number from the list)
    - API keys for Pexels and Tenor
 
 5. **When finished, the video will be displayed in Colab and available for download**
+
+## Important Note
+This solution runs directly as Python code in your Colab notebook. It does NOT:
+- Start any web server
+- Open any local URLs (http://127.0.0.1:port)
+- Use Gradio or any web interface
+- Require any port forwarding
 
 ## Files Included
 

@@ -1,6 +1,9 @@
 """
-Launcher script for YouTube Video Creator in Google Colab
+Launcher script for YouTube Video Creator in Google Colab (No Gradio)
 Simply run this script in a Colab cell to download and set up everything
+
+This is a direct Python implementation with NO web server or Gradio interface.
+All interaction happens through command-line prompts directly in the Colab cell.
 
 Usage in Colab:
 !curl -s https://raw.githubusercontent.com/YOUR_USERNAME/youtube-video-creator/main/colab_launcher.py | python
@@ -24,7 +27,7 @@ def download_file(url, filename):
 def main():
     """Main function to download and set up the YouTube Video Creator"""
     print("=" * 60)
-    print("Setting up YouTube Video Creator for Google Colab".center(60))
+    print("Setting up YouTube Video Creator for Google Colab (No Gradio)".center(60))
     print("=" * 60)
     
     # List of files to download
@@ -54,6 +57,8 @@ def main():
         
         # Run the main application
         print("\nStarting YouTube Video Creator...\n")
+        print("NOTE: This runs as pure Python script with direct command prompts.")
+        print("NO web server or Gradio interface will be started.")
         subprocess.run([sys.executable, "run_app.py"])
     except Exception as e:
         print(f"Error during setup: {e}")

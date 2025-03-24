@@ -26,7 +26,8 @@ def install_dependencies():
         "whisperx>=3.2.0", 
         "torch>=2.0.0",
         "torchvision>=0.15.0",
-        "torchaudio>=2.0.0"
+        "torchaudio>=2.0.0",
+        "ipywidgets>=8.0.0"
     ]
     
     for package in packages:
@@ -63,4 +64,4 @@ if __name__ == "__main__":
     
     end_time = time.time()
     print(f"Setup completed in {end_time - start_time:.2f} seconds!")
-    print("\nYou can now run the YouTube Video Creator by importing video_creator.py") 
+    print("\nYou can now run the YouTube Video Creator by running run_app.py") 
